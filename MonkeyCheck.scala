@@ -153,40 +153,66 @@ object MonkeyCheck {
     }
   }
 
-  object Between {
-    // Used internally to make generators for ordered things like numbers.
-    type Between[T] = (T, T) => Generator[T]
+  object NonNegativeNumbers {
 
-    private def chooseLong(low: Long, high: Long, random: => Long): Option[Long] = {
-      if (low <= high) Some(low + math.abs(random % ((high - low) + 1))) else None
-    }
-
-    private def chooseDouble(low: Double, high: Double, random: => Double): Option[Double] = {
-      if (low <= high) Some(low + math.abs(random % ((high - low) + 1))) else None
-    }
-
-    implicit val betweenByte: Between[Byte] = (low: Byte, high: Byte) => new Generator[Byte] {
-      def apply(ps: Parameters) = chooseLong(low, high, ps.random.nextLong).map(_.toByte)
-    }
-    implicit val betweenChar: Between[Char] = (low: Char, high: Char) => new Generator[Char] {
-      def apply(ps: Parameters) = chooseLong(low, high, ps.random.nextLong).map(_.toChar)
-    }
-    implicit val betweenShort: Between[Short] = (low: Short, high: Short) => new Generator[Short] {
-      def apply(ps: Parameters) = chooseLong(low, high, ps.random.nextLong).map(_.toShort)
-    }
-    implicit val betweenInt: Between[Int] = (low: Int, high: Int) => new Generator[Int] {
-      def apply(ps: Parameters) = chooseLong(low, high, ps.random.nextLong).map(_.toInt)
-    }
-    implicit val betweenLong: Between[Long] = (low: Long, high: Long) => new Generator[Long] {
-      def apply(ps: Parameters) = chooseLong(low, high, ps.random.nextLong)
-    }
-    implicit val betweenFloat: Between[Float] = (low: Float, high: Float) => new Generator[Float] {
-      def apply(ps: Parameters) = chooseDouble(low, high, ps.random.nextDouble).map(_.toInt)
-    }
-    implicit val betweenDouble: Between[Double] = (low: Double, high: Double) => new Generator[Double] {
-      def apply(ps: Parameters) = chooseDouble(low, high, ps.random.nextDouble).map(_.toInt)
-    }
+    implicit lazy val nonNegativeByte:   Generator[Byte]    = between(0, Byte.MaxValue)
+    implicit lazy val nonNegativeShort:  Generator[Short]   = between(0, Short.MaxValue)
+    implicit lazy val nonNegativeInt:    Generator[Int]     = between(0, Int.MaxValue)
+    implicit lazy val nonNegativeLong:   Generator[Long]    = between(0, Long.MaxValue)
+    implicit lazy val nonNegativeFloat:  Generator[Float]   = between(0, Float.MaxValue)
+    implicit lazy val nonNegativeDouble: Generator[Double]  = between(0, Double.MaxValue)
 
   }
 
+  object NegativeNumbers {
+
+    implicit lazy val negativeByte:   Generator[Byte]    = between(Byte.MinValue, -1)
+    implicit lazy val negativeShort:  Generator[Short]   = between(Short.MinValue, -1)
+    implicit lazy val negativeInt:    Generator[Int]     = between(Int.MinValue, -1)
+    implicit lazy val negativeLong:   Generator[Long]    = between(Long.MinValue, -1)
+    implicit lazy val negativeFloat:  Generator[Float]   = between(Float.MinValue, -1)
+    implicit lazy val negativeDouble: Generator[Double]  = between(Double.MinValue, -1)
+
+  }
+
+  object Between {
+
+    // Used internally to make generators for ordered things like numbers.
+    type Between[T] = (T, T) => Generator[T]
+
+    // This is still not quite right since while a double can
+    // represent the magnitude of the difference between Long.MinValue
+    // and Long.MaxValue it looses precision. We handle that specific
+    // case specially but similarly large ranges will have the same
+    // problem, I think.
+    private def choose(low: Double, high: Double, random: => Double) = if (low <= high) Some(low + (((high - low) + 1) * random)) else None
+
+    implicit val betweenByte: Between[Byte] = (low: Byte, high: Byte) => new Generator[Byte] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toByte)
+    }
+    implicit val betweenChar: Between[Char] = (low: Char, high: Char) => new Generator[Char] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toChar)
+    }
+    implicit val betweenShort: Between[Short] = (low: Short, high: Short) => new Generator[Short] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toShort)
+    }
+    implicit val betweenInt: Between[Int] = (low: Int, high: Int) => new Generator[Int] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toInt)
+    }
+    implicit val betweenLong: Between[Long] = (low: Long, high: Long) => new Generator[Long] {
+      def apply(ps: Parameters) =
+        // See comment above at choose.
+        if (low == Long.MinValue && high == Long.MaxValue) {
+          Some(ps.random.nextLong)
+        } else {
+          choose(low, high, ps.random.nextDouble).map(_.toLong)
+        }
+    }
+    implicit val betweenFloat: Between[Float] = (low: Float, high: Float) => new Generator[Float] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toFloat)
+    }
+    implicit val betweenDouble: Between[Double] = (low: Double, high: Double) => new Generator[Double] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble)
+    }
+  }
 }
