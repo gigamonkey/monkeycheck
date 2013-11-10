@@ -1,37 +1,111 @@
-package org.scalacheck
+package org.monkeycheck
 
 import scala.util.Random
+import scala.annotation.tailrec
 
 object MonkeyCheck {
 
   import Between._
 
-  // Properties are what we check automatically.
-  type Property[-T] = T => Boolean
+  type Predicate[-T] = T => Boolean
 
   case class Parameters(size: Int, random: Random)
 
-  trait Generator[T] extends (Parameters => Option[T]) {
+  // Each time we check a Property we get a piece of evidence
+  // concerning the unerlying property.
+
+  sealed trait Evidence[T]
+  case class Undecided[T](value: T) extends Evidence[T]
+  case class Support[T](value: T) extends Evidence[T]
+  case class Falsified[T](value: T) extends Evidence[T]
+  case class Proved[T](value: T) extends Evidence[T]
+
+
+  // Checking a Property many times yields a result. While we are
+  // checking the result may be Unknown which keeps a count of times
+  // we've seen Support vs the total number of checks. If the
+  // Property is not proven or disproven then we will determine
+  // whether it passed or failed based on the ratio of support to
+  // checks.
+  sealed trait Result
+  case class Unknown(support: Int, noSupport: Int) extends Result
+  case object Passed extends Result
+  case object Failed extends Result
+
+  // A Property is a function that can be passed a set of parameters
+  // for a generator and tries to return a Evidence. To actually check a
+  // Property we need to call it multiple times and make sure it
+  // never fails. The apply method of a given Property should return
+  // Undecided when
+  trait Property[T] extends (Parameters => Option[Evidence[T]])
+
+  object Property {
+
+    implicit def toProperty[T](p: Predicate[T])(implicit g: Generator[T]) = new Property[T] {
+      def apply(params: Parameters) = g(params).map { t => if (p(t)) Support(t) else Falsified(t) }
+    }
+
+    // Exists some value for which the predicate is true.
+    def exists[T](p: Predicate[T])(implicit g: Generator[T]) = new Property[T] {
+      def apply(params: Parameters) = g(params).map { t => if (p(t)) Proved(t) else Undecided(t) }
+    }
+
+    // For all values the predicate is true.
+    def forAll[T](p: Predicate[T])(implicit g: Generator[T]) = new Property[T] {
+      def apply(params: Parameters) = g(params).map { t => if (p(t)) Support(t) else Falsified(t) }
+    }
+  }
+
+
+  def check[T](property: Property[T], params: Parameters): Result = {
+    @tailrec def loop(iters: Int, support: Int, trials: Int): Result = {
+      if (iters == 0) {
+        Unknown(support, trials)
+      } else {
+        val opt = property(params)
+        if (opt.isDefined) { // Can't map because compiler can't see tail recursion.
+          opt.get match {
+            case Undecided(_) => loop(iters - 1, support, trials + 1)
+            case Support(_)   => loop(iters - 1, support + 1, trials + 1)
+            case Proved(_)    => Passed
+            case Falsified(_) => Failed
+          }
+        } else {
+          loop(iters -1, support, trials)
+        }
+      }
+    }
+
+    loop(0, 0, 100) match {
+      case pass @ Passed => pass
+      case fail @ Failed => fail
+      case Unknown(support, trials) =>
+        if ((support.toDouble / trials) > .8) Passed else Failed
+    }
+  }
+
+
+  trait Generator[T] extends (Parameters => Option[T]) { outer =>
 
     def apply(p: Parameters): Option[T]
 
     def shrink(value: T): Stream[T] = Stream.empty
 
     def map[U](fn: T => U): Generator[U] = new Generator[U] {
-      def apply(p: Parameters) = Generator.this(p).map(fn)
+      def apply(p: Parameters) = outer(p).map(fn)
     }
 
     def flatMap[U](fn: T => Generator[U]): Generator[U] = new Generator[U] {
-      def apply(p: Parameters) = Generator.this(p).flatMap(fn(_)(p))
+      def apply(p: Parameters) = outer(p).flatMap(fn(_)(p))
     }
 
     def filter(fn: T => Boolean): Generator[T] = new Generator[T] {
-      def apply(p: Parameters) = Generator.this.apply(p).filter(fn)
-      override def shrink(value: T) = Generator.this.shrink(value).filter(fn)
+      def apply(p: Parameters) = outer.apply(p).filter(fn)
+      override def shrink(value: T) = outer.shrink(value).filter(fn)
     }
 
     def shrinkWith(fn: T => Stream[T]) = new Generator[T] {
-      def apply(p: Parameters) = Generator.this.apply(p)
+      def apply(p: Parameters) = outer.apply(p)
       override def shrink(value: T) = fn(value)
     }
   }
@@ -45,27 +119,64 @@ object MonkeyCheck {
   def oneOf[T](t: T, ts: T*): Generator[T] = oneOf[T](t +: ts)
   def const[T](t: T) = new Generator[T] { def apply(p: Parameters) = Some(t) }
 
-  // Arbitrary generators are the base case generators for when all we
-  // know about what we want is the type. If you want to have them
-  // accessible, you'll want to import MonkeyCheck.Arbitrary._
+  // Arbitrary generators are simply some handy generators for common
+  // types organized for easy importation.
   object Arbitrary {
 
-    implicit lazy val arbitraryByte:    Generator[Byte]    = between(Byte.MinValue, Byte.MaxValue)
+    object Numbers {
+
+      object + {
+        implicit lazy val positiveByte:   Generator[Byte]    = between(1, Byte.MaxValue)
+        implicit lazy val positiveShort:  Generator[Short]   = between(1, Short.MaxValue)
+        implicit lazy val positiveInt:    Generator[Int]     = between(1, Int.MaxValue)
+        implicit lazy val positiveLong:   Generator[Long]    = between(1, Long.MaxValue)
+        implicit lazy val positiveFloat:  Generator[Float]   = between(1, Float.MaxValue)
+        implicit lazy val positiveDouble: Generator[Double]  = between(1, Double.MaxValue)
+      }
+
+      object - {
+        implicit lazy val negativeByte:   Generator[Byte]    = between(Byte.MinValue, -1)
+        implicit lazy val negativeShort:  Generator[Short]   = between(Short.MinValue, -1)
+        implicit lazy val negativeInt:    Generator[Int]     = between(Int.MinValue, -1)
+        implicit lazy val negativeLong:   Generator[Long]    = between(Long.MinValue, -1)
+        implicit lazy val negativeFloat:  Generator[Float]   = between(Float.MinValue, -1)
+        implicit lazy val negativeDouble: Generator[Double]  = between(Double.MinValue, -1)
+      }
+
+      object !- {
+        implicit lazy val nonNegativeByte:   Generator[Byte]    = between(0, Byte.MaxValue)
+        implicit lazy val nonNegativeShort:  Generator[Short]   = between(0, Short.MaxValue)
+        implicit lazy val nonNegativeInt:    Generator[Int]     = between(0, Int.MaxValue)
+        implicit lazy val nonNegativeLong:   Generator[Long]    = between(0, Long.MaxValue)
+        implicit lazy val nonNegativeFloat:  Generator[Float]   = between(0, Float.MaxValue)
+        implicit lazy val nonNegativeDouble: Generator[Double]  = between(0, Double.MaxValue)
+      }
+
+      implicit lazy val arbitraryByte:    Generator[Byte]    = between(Byte.MinValue, Byte.MaxValue)
+      implicit lazy val arbitraryShort:   Generator[Short]   = between(Short.MinValue, Short.MaxValue)
+      implicit lazy val arbitraryInt:     Generator[Int]     = between(Int.MinValue, Int.MaxValue)
+      implicit lazy val arbitraryLong:    Generator[Long]    = between(Long.MinValue, Long.MaxValue)
+      implicit lazy val arbitraryFloat:   Generator[Float]   = between(Float.MinValue, Float.MaxValue)
+      implicit lazy val arbitraryDouble:  Generator[Double]  = between(Double.MinValue, Double.MaxValue)
+
+    }
+
     implicit lazy val arbitraryChar:    Generator[Char]    = between(Char.MinValue, Char.MaxValue)
-    implicit lazy val arbitraryShort:   Generator[Short]   = between(Short.MinValue, Short.MaxValue)
-    implicit lazy val arbitraryInt:     Generator[Int]     = between(Int.MinValue, Int.MaxValue)
-    implicit lazy val arbitraryLong:    Generator[Long]    = between(Long.MinValue, Long.MaxValue)
-    implicit lazy val arbitraryFloat:   Generator[Float]   = between(Float.MinValue, Float.MaxValue)
-    implicit lazy val arbitraryDouble:  Generator[Double]  = between(Double.MinValue, Double.MaxValue)
     implicit lazy val arbitraryBoolean: Generator[Boolean] = oneOf(true, false)
     implicit lazy val arbitraryUnit:    Generator[Unit]    = const(())
 
     implicit lazy val arbitraryAnyVal:  Generator[AnyVal] = new Generator[AnyVal] {
       def apply(p: Parameters) =
         oneOf(
-          arbitraryByte, arbitraryChar, arbitraryShort, arbitraryInt, arbitraryLong,
-          arbitraryFloat, arbitraryDouble, arbitraryBoolean, arbitraryUnit)
-          .apply(p).flatMap(_.apply(p))
+          Numbers.arbitraryByte,
+          Numbers.arbitraryShort,
+          Numbers.arbitraryInt,
+          Numbers.arbitraryLong,
+          Numbers.arbitraryFloat,
+          Numbers.arbitraryDouble,
+          arbitraryChar,
+          arbitraryBoolean,
+          arbitraryUnit).apply(p).flatMap(_.apply(p))
     }
 
     // In scalacheck, the arbitrary option goes through some
@@ -153,27 +264,6 @@ object MonkeyCheck {
     }
   }
 
-  object NonNegativeNumbers {
-
-    implicit lazy val nonNegativeByte:   Generator[Byte]    = between(0, Byte.MaxValue)
-    implicit lazy val nonNegativeShort:  Generator[Short]   = between(0, Short.MaxValue)
-    implicit lazy val nonNegativeInt:    Generator[Int]     = between(0, Int.MaxValue)
-    implicit lazy val nonNegativeLong:   Generator[Long]    = between(0, Long.MaxValue)
-    implicit lazy val nonNegativeFloat:  Generator[Float]   = between(0, Float.MaxValue)
-    implicit lazy val nonNegativeDouble: Generator[Double]  = between(0, Double.MaxValue)
-
-  }
-
-  object NegativeNumbers {
-
-    implicit lazy val negativeByte:   Generator[Byte]    = between(Byte.MinValue, -1)
-    implicit lazy val negativeShort:  Generator[Short]   = between(Short.MinValue, -1)
-    implicit lazy val negativeInt:    Generator[Int]     = between(Int.MinValue, -1)
-    implicit lazy val negativeLong:   Generator[Long]    = between(Long.MinValue, -1)
-    implicit lazy val negativeFloat:  Generator[Float]   = between(Float.MinValue, -1)
-    implicit lazy val negativeDouble: Generator[Double]  = between(Double.MinValue, -1)
-
-  }
 
   object Between {
 
