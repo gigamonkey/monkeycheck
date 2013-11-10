@@ -36,15 +36,10 @@ object MonkeyCheck {
   case class Falsified[T](value: T) extends Evidence[T]
   case class Proved[T](value: T) extends Evidence[T]
 
-  // Checking a Property many times yields a result. While we are
-  // checking, the result may be Unknown, in which case we keep a
-  // count of times we've seen Support vs the total number of
-  // checks. After we have done all our checks, if the Property is
-  // still neither proven or disproven, then we will convert an
-  // Unknown to a pass or fail based on the ratio of support to
-  // checks.
+  // Checking a Property many times yields a result either be being
+  // actualy Proved or Falsified or, after we have done all our
+  // checks, based on the ratio of support to checks.
   sealed trait Result[T]
-  case class Unknown[T](support: Int, noSupport: Int) extends Result[T]
   case class Passed[T]() extends Result[T]
   case class Failed[T](value: Option[T]) extends Result[T]
 
@@ -103,7 +98,7 @@ object MonkeyCheck {
   def check[T](property: Property[T], params: Parameters): Result[T] = {
     @tailrec def loop(iters: Int, support: Int, trials: Int): Result[T] = {
       if (iters == 0) {
-        Unknown(support, trials)
+        if ((support.toDouble / trials) > .8) Passed() else Failed(None)
       } else {
         val opt = property(params)
         // Can't map the Option because compiler can't see tail
@@ -124,15 +119,7 @@ object MonkeyCheck {
     // FIXME: the number of iterations should be attached to the
     // propety itself, perhaps derived from the generator if not
     // otherwise specified.
-    loop(100, 0, 0) match {
-      case pass @ Passed() => pass
-      case fail @ Failed(_) => fail
-      case Unknown(support, trials) =>
-        if ((support.toDouble / trials) > .8) Passed[T] else {
-          println("Converting %d/%d to Failed".format(support, trials))
-          Failed[T](None)
-        }
-    }
+    loop(100, 0, 0)
   }
 
   trait Generator[T] extends (Parameters => Option[T]) { outer =>
@@ -364,11 +351,11 @@ object HelloWorld {
     import MonkeyCheck.Property._
 
     def show[T](label: String, r: Result[T]) = {
-      r match {
-        case Passed()                => println(label + ": okay!")
-        case Failed(t)               => println(label + ": whoops! Failed at: " + t.getOrElse("unknown"))
-        case Unknown(support, total) => println(label + ": what the heck?! Unknown result: %d/%d".format(support, total))
-      }
+      println((label + " ").padTo(60, '.') + " " +
+        (r match {
+          case Passed() => "okay."
+          case Failed(t) => "whoops! Failed at: " + t.getOrElse("unknown")
+        }))
     }
 
     val params = Parameters(10, new Random)
