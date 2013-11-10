@@ -31,12 +31,26 @@ object MonkeyCheck {
   // properties because a single check that fails only tells us that
   // that particular input didn't satisfy the property.
   sealed trait Evidence[T]
-  case class Undecided[T](value: T) extends Evidence[T]
-  case class Support[T](value: T) extends Evidence[T]
-  case class Falsified[T](value: T) extends Evidence[T]
+
+  // Based on value, the property was proved to hold. (E.g. an exists
+  // property can be proven with a single value.)
   case class Proved[T](value: T) extends Evidence[T]
 
-  // Checking a Property many times yields a result either be being
+  // Based on the value, the property was proved not to hold. (E.g. a
+  // forAll property can be falsified by a single counter example.)
+  case class Falsified[T](value: T) extends Evidence[T]
+
+  // The value tested provides support that the property could be
+  // true. (E.g. a specific value that passes a forAll property
+  // check.)
+  case class Support[T](value: T) extends Evidence[T]
+
+  // The value provided neither supports our belief in the property
+  // nor disproves it. (E.g. a value that fails an exists property.)
+  case class Undecided[T](value: T) extends Evidence[T]
+
+  ////////////////////////////////////////////////////////////////////////
+  // Checking a Property many times yields a result, either be being
   // actualy Proved or Falsified or, after we have done all our
   // checks, based on the ratio of support to checks.
   sealed trait Result[T]
@@ -98,20 +112,14 @@ object MonkeyCheck {
   def check[T](property: Property[T], params: Parameters): Result[T] = {
     @tailrec def loop(iters: Int, support: Int, trials: Int): Result[T] = {
       if (iters == 0) {
-        if ((support.toDouble / trials) > .8) Passed() else Failed(None)
+        if (trials > 0 && (support.toDouble / trials) > .8) Passed() else Failed(None)
       } else {
-        val opt = property(params)
-        // Can't map the Option because compiler can't see tail
-        // recursion through a getOrElse.
-        if (opt.isDefined) {
-          opt.get match {
-            case Undecided(_) => loop(iters - 1, support, trials + 1)
-            case Support(_)   => loop(iters - 1, support + 1, trials + 1)
-            case Proved(_)    => Passed[T]
-            case Falsified(t) => Failed(Some(t))
-          }
-        } else {
-          loop(iters -1, support, trials)
+        property(params) match {
+          case Some(Proved(_))    => Passed()
+          case Some(Falsified(t)) => Failed(Some(t))
+          case Some(Support(_))   => loop(iters - 1, support + 1, trials + 1)
+          case Some(Undecided(_)) => loop(iters - 1, support, trials + 1)
+          case None               => loop(iters - 1, support, trials)
         }
       }
     }
@@ -119,7 +127,7 @@ object MonkeyCheck {
     // FIXME: the number of iterations should be attached to the
     // propety itself, perhaps derived from the generator if not
     // otherwise specified.
-    loop(100, 0, 0)
+    loop(1000000, 0, 0)
   }
 
   trait Generator[T] extends (Parameters => Option[T]) { outer =>
@@ -137,19 +145,19 @@ object MonkeyCheck {
     }
 
     def filter(fn: T => Boolean): Generator[T] = new Generator[T] {
-      def apply(p: Parameters) = outer.apply(p).filter(fn)
+      def apply(p: Parameters) = outer(p).filter(fn)
       override def shrink(value: T) = outer.shrink(value).filter(fn)
     }
 
     def shrinkWith(fn: T => Stream[T]) = new Generator[T] {
-      def apply(p: Parameters) = outer.apply(p)
+      def apply(p: Parameters) = outer(p)
       override def shrink(value: T) = fn(value)
     }
   }
 
   // Public methods for getting generators.
 
-  def arbitrary[T](ps: Parameters)(implicit g: Generator[T]): Option[T] = g.apply(ps)
+  def arbitrary[T](ps: Parameters)(implicit g: Generator[T]): Option[T] = g(ps)
   def generator[T](implicit g: Generator[T]): Generator[T] = g
   def theGenerator[T](implicit g: Generator[T]): Generator[T] = g
   def between[T](min: T, max: T)(implicit b: Between[T]): Generator[T] = b(min, max)
@@ -371,18 +379,17 @@ object HelloWorld {
 
     show("string length", check(forAll((s1: String, s2: String) => (s1 + s2).length == s1.length + s2.length), params))
     show("string reverse", check(forAll((s1: String) => s1.reverse.reverse == s1), params))
+    show("string upper/lower", check(forAll((s: String) => s.toUpperCase.toLowerCase == s.toLowerCase), params))
 
     def allNumbers() {
       import MonkeyCheck.Arbitrary.Numbers._
       val p = forAll { (i: Int) => i + 2 > i }
-      val p2 = forAll { (i: Int) => i - 2 > i }
-      show("i + 2 > i", check(p, params))
-      show("i - 2 > i", check(p2, params))
-      show("i * 10 > i", check((i: Int) => i * 10 > i, params))
-      show("* commutative", check(forAll((i1: Int, i2: Int) => i1 * i2 == i2 * i1), params))
-      show("exists i * 10 < i", check(exists((i: Int) => i * 10 < i), params))
-      show("exists i * 10 == i", check(exists((i: Byte) => i * 10 == i), params))
-      show("i * 10 != i", check((i: Byte) => i * 10 != i, params))
+      show("i + 2 > i",          check(p, params))
+      show("i * 10 > i",         check((i: Long) => i * 10 > i, params))
+      show("* commutative",      check(forAll((i1: Int, i2: Int) => i1 * i2 == i2 * i1), params))
+      show("exists i * 10 < i",  check(exists((i: Int) => i * 10 < i), params))
+      show("exists i * 10 == i", check(exists((i: Short) => i * 10 == i), params))
+      show("i * 10 != i",        check((i: Short) => i * 10 != i, params))
     }
 
     def positiveNumbers() {
