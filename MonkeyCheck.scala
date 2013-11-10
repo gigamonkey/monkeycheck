@@ -10,11 +10,26 @@ object MonkeyCheck {
 
   type Predicate[-T] = T => Boolean
 
+  // Not clear right level to do this as we may want to combine
+  // Properties rather than Predicates.
+  implicit class RichPredicate[T](p: Predicate[T]) {
+
+    def &&(other: Predicate[T]) = (t: T) => p(t) && other(t)
+
+    def ||(other: Predicate[T]) = (t: T) => p(t) || other(t)
+
+    def infix_!() = (t: T) => !p(t)
+
+  }
+
   case class Parameters(size: Int, random: Random)
 
   // Each time we check a Property we get a piece of evidence
-  // concerning the unerlying property.
-
+  // concerning the unerlying predicate. By checking the same property
+  // many times with different inputs we can amass enough evidence to
+  // return a Result. Undecided evidence only arises in exists
+  // properties because a single check that fails only tells us that
+  // that particular input didn't satisfy the property.
   sealed trait Evidence[T]
   case class Undecided[T](value: T) extends Evidence[T]
   case class Support[T](value: T) extends Evidence[T]
@@ -24,9 +39,10 @@ object MonkeyCheck {
   // Checking a Property many times yields a result. While we are
   // checking, the result may be Unknown, in which case we keep a
   // count of times we've seen Support vs the total number of
-  // checks. If the Property is not proven or disproven after we have
-  // done all our checks, then we will convert an Unknown to a pass or
-  // fail based on the ratio of support to checks.
+  // checks. After we have done all our checks, if the Property is
+  // still neither proven or disproven, then we will convert an
+  // Unknown to a pass or fail based on the ratio of support to
+  // checks.
   sealed trait Result[T]
   case class Unknown[T](support: Int, noSupport: Int) extends Result[T]
   case class Passed[T]() extends Result[T]
@@ -35,8 +51,7 @@ object MonkeyCheck {
   // A Property is a function that can be passed a set of parameters
   // for a generator and tries to return a Evidence. To actually check
   // a Property we need to call it multiple times and make sure it
-  // never fails. The apply method of a given Property should return
-  // Undecided when
+  // never fails.
   abstract class Property[T](
     val predicate: Predicate[T],
     val generator: Generator[T]
@@ -91,7 +106,9 @@ object MonkeyCheck {
         Unknown(support, trials)
       } else {
         val opt = property(params)
-        if (opt.isDefined) { // Can't map because compiler can't see tail recursion.
+        // Can't map the Option because compiler can't see tail
+        // recursion through a getOrElse.
+        if (opt.isDefined) {
           opt.get match {
             case Undecided(_) => loop(iters - 1, support, trials + 1)
             case Support(_)   => loop(iters - 1, support + 1, trials + 1)
@@ -104,6 +121,9 @@ object MonkeyCheck {
       }
     }
 
+    // FIXME: the number of iterations should be attached to the
+    // propety itself, perhaps derived from the generator if not
+    // otherwise specified.
     loop(100, 0, 0) match {
       case pass @ Passed() => pass
       case fail @ Failed(_) => fail
@@ -295,7 +315,6 @@ object MonkeyCheck {
     }
   }
 
-
   object Between {
 
     // Used internally to make generators for ordered things like numbers.
@@ -339,35 +358,49 @@ object MonkeyCheck {
 }
 
 object HelloWorld {
+
   def main(args: Array[String]) {
     import MonkeyCheck._
     import MonkeyCheck.Property._
 
-
-    def show[T](r: Result[T]) = {
+    def show[T](label: String, r: Result[T]) = {
       r match {
-        case Passed()                => println("okay!")
-        case Failed(t)               => println("whoops! Failed at: " + t.getOrElse("unknown"))
-        case Unknown(support, total) => println("What the heck?! Unknown result: %d/%d".format(support, total))
+        case Passed()                => println(label + ": okay!")
+        case Failed(t)               => println(label + ": whoops! Failed at: " + t.getOrElse("unknown"))
+        case Unknown(support, total) => println(label + ": what the heck?! Unknown result: %d/%d".format(support, total))
       }
     }
 
     val params = Parameters(10, new Random)
 
+    implicit val sgen: Generator[String] = new Generator[String] {
+      def apply(params: Parameters) = {
+        import MonkeyCheck.Arbitrary._
+        val sb = new StringBuilder(params.size)
+        for (i <- 1 to params.size) { arbitrary[Char](params).foreach { c => sb + c } }
+        Some(sb.toString)
+      }
+    }
+
+    show("string length", check(forAll((s1: String, s2: String) => (s1 + s2).length == s1.length + s2.length), params))
+    show("string reverse", check(forAll((s1: String) => s1.reverse.reverse == s1), params))
 
     def allNumbers() {
       import MonkeyCheck.Arbitrary.Numbers._
       val p = forAll { (i: Int) => i + 2 > i }
       val p2 = forAll { (i: Int) => i - 2 > i }
-      show(check(p, params))
-      show(check(p2, params))
-      show(check((i: Int) => i * 10 > i, params))
-      show(check(forAll((i1: Int, i2: Int) => i1 * i2 == i2 * i1), params))
+      show("i + 2 > i", check(p, params))
+      show("i - 2 > i", check(p2, params))
+      show("i * 10 > i", check((i: Int) => i * 10 > i, params))
+      show("* commutative", check(forAll((i1: Int, i2: Int) => i1 * i2 == i2 * i1), params))
+      show("exists i * 10 < i", check(exists((i: Int) => i * 10 < i), params))
+      show("exists i * 10 == i", check(exists((i: Byte) => i * 10 == i), params))
+      show("i * 10 != i", check((i: Byte) => i * 10 != i, params))
     }
 
     def positiveNumbers() {
       import MonkeyCheck.Arbitrary.Numbers.+._
-      show(check(forAll((i1: Int, i2: Int) => i1 + i2 > i1 && i1 + i2 > i2), params))
+      show("sums greater than their parts", check(forAll((i1: Int, i2: Int) => i1 + i2 > i1 && i1 + i2 > i2), params))
     }
 
     allNumbers()
