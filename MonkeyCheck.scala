@@ -7,128 +7,7 @@ import scala.util.Random
 object MonkeyCheck {
 
   import Between._
-
-  type Predicate[-T] = T => Boolean
-
-  // Not clear right level to do this as we may want to combine
-  // Properties rather than Predicates.
-  implicit class RichPredicate[T](p: Predicate[T]) {
-
-    def &&(other: Predicate[T]) = (t: T) => p(t) && other(t)
-
-    def ||(other: Predicate[T]) = (t: T) => p(t) || other(t)
-
-    def infix_!() = (t: T) => !p(t)
-
-  }
-
-  case class Parameters(size: Int, random: Random)
-
-  // Each time we check a Property we get a piece of evidence
-  // concerning the unerlying predicate. By checking the same property
-  // many times with different inputs we can amass enough evidence to
-  // return a Result. Undecided evidence only arises in exists
-  // properties because a single check that fails only tells us that
-  // that particular input didn't satisfy the property.
-  sealed trait Evidence[T]
-
-  // Based on value, the property was proved to hold. (E.g. an exists
-  // property can be proven with a single value.)
-  case class Proved[T](value: T) extends Evidence[T]
-
-  // Based on the value, the property was proved not to hold. (E.g. a
-  // forAll property can be falsified by a single counter example.)
-  case class Falsified[T](value: T) extends Evidence[T]
-
-  // The value tested provides support that the property could be
-  // true. (E.g. a specific value that passes a forAll property
-  // check.)
-  case class Support[T](value: T) extends Evidence[T]
-
-  // The value provided neither supports our belief in the property
-  // nor disproves it. (E.g. a value that fails an exists property.)
-  case class Undecided[T](value: T) extends Evidence[T]
-
-  ////////////////////////////////////////////////////////////////////////
-  // Checking a Property many times yields a result, either be being
-  // actualy Proved or Falsified or, after we have done all our
-  // checks, based on the ratio of support to checks.
-  sealed trait Result[T]
-  case class Passed[T]() extends Result[T]
-  case class Failed[T](value: Option[T]) extends Result[T]
-
-  // A Property is a function that can be passed a set of parameters
-  // for a generator and tries to return a Evidence. To actually check
-  // a Property we need to call it multiple times and make sure it
-  // never fails.
-  abstract class Property[T](
-    val predicate: Predicate[T],
-    val generator: Generator[T]
-  ) extends (Parameters => Option[Evidence[T]])
-
-  object Property {
-
-    import Arbitrary._
-
-    implicit def toProperty[T](p: Predicate[T])(implicit g: Generator[T]) = new Property(p, g) {
-      def apply(params: Parameters) = generator(params).map { t =>
-        if (predicate(t)) Support(t) else Falsified(t)
-      }
-    }
-
-    // Default conversion of a predicate to a property is to capture
-    // the appropriate generator and assert that the predicat should
-    // hold for all generated values.
-    def forAll[T](p: Predicate[T])(implicit g: Generator[T]) = toProperty(p)(g)
-
-    def forAll[
-      T1:Generator,
-      T2:Generator]
-      (fn: (T1, T2) => Boolean) = toProperty(fn.tupled)(arbitraryTuple[T1, T2])
-
-    def forAll[
-      T1:Generator,
-      T2:Generator,
-      T3:Generator]
-      (fn: (T1, T2, T3) => Boolean) = toProperty(fn.tupled)(arbitraryTuple[T1, T2, T3])
-
-    def forAll[
-      T1:Generator,
-      T2:Generator,
-      T3:Generator,
-      T4:Generator]
-      (fn: (T1, T2, T3, T4) => Boolean) = toProperty(fn.tupled)(arbitraryTuple[T1, T2, T3, T4])
-
-    // Less frequently used in tests, ocassionally it's useful to be
-    // able to assert that a predicate holds for at least one
-    // generated value.
-    def exists[T](p: Predicate[T])(implicit g: Generator[T]) = new Property(p, g) {
-      def apply(params: Parameters) = generator(params).map { t =>
-        if (predicate(t)) Proved(t) else Undecided(t)
-      }
-    }
-  }
-
-  def check[T](property: Property[T], params: Parameters): Result[T] = {
-    @tailrec def loop(iters: Int, support: Int, trials: Int): Result[T] = {
-      if (iters == 0) {
-        if (trials > 0 && (support.toDouble / trials) > .8) Passed() else Failed(None)
-      } else {
-        property(params) match {
-          case Some(Proved(_))    => Passed()
-          case Some(Falsified(t)) => Failed(Some(t))
-          case Some(Support(_))   => loop(iters - 1, support + 1, trials + 1)
-          case Some(Undecided(_)) => loop(iters - 1, support, trials + 1)
-          case None               => loop(iters - 1, support, trials)
-        }
-      }
-    }
-
-    // FIXME: the number of iterations should be attached to the
-    // propety itself, perhaps derived from the generator if not
-    // otherwise specified.
-    loop(1000000, 0, 0)
-  }
+  import Generator._
 
   trait Generator[T] extends (Parameters => Option[T]) { outer =>
 
@@ -149,21 +28,62 @@ object MonkeyCheck {
       override def shrink(value: T) = outer.shrink(value).filter(fn)
     }
 
-    def shrinkWith(fn: T => Stream[T]) = new Generator[T] {
+    def shrinkWith(fn: T => Stream[T]): Generator[T] = new Generator[T] {
       def apply(p: Parameters) = outer(p)
       override def shrink(value: T) = fn(value)
     }
   }
 
-  // Public methods for getting generators.
+  object Generator {
+    def generator[T](implicit g: Generator[T]): Generator[T]              = g
+    def between[T](min: T, max: T)(implicit b: Between[T]): Generator[T]  = b(min, max)
+    def oneOf[T](xs: Seq[T]): Generator[T]                                = between(0, xs.size - 1).map(xs(_))
+    def oneOf[T](t: T, ts: T*): Generator[T]                              = oneOf(t +: ts)
+    def const[T](t: T)                                                    = new Generator[T] { def apply(p: Parameters) = Some(t) }
+    def arbitrary[T](ps: Parameters)(implicit g: Generator[T]): Option[T] = g(ps)
+  }
 
-  def arbitrary[T](ps: Parameters)(implicit g: Generator[T]): Option[T] = g(ps)
-  def generator[T](implicit g: Generator[T]): Generator[T] = g
-  def theGenerator[T](implicit g: Generator[T]): Generator[T] = g
-  def between[T](min: T, max: T)(implicit b: Between[T]): Generator[T] = b(min, max)
-  def oneOf[T](xs: Seq[T]): Generator[T] = between(0, xs.size - 1).map(xs(_))
-  def oneOf[T](t: T, ts: T*): Generator[T] = oneOf[T](t +: ts)
-  def const[T](t: T) = new Generator[T] { def apply(p: Parameters) = Some(t) }
+  object Between {
+
+    // Used internally to make generators for ordered things like numbers.
+    type Between[T] = (T, T) => Generator[T]
+
+    // This is still not quite right since while a double can
+    // represent the magnitude of the difference between Long.MinValue
+    // and Long.MaxValue it looses precision. We handle that specific
+    // case specially but similarly large ranges will have the same
+    // problem, I think.
+    private def choose(low: Double, high: Double, random: => Double) =
+      if (low <= high) Some(low + (((high - low) + 1) * random)) else None
+
+    implicit val betweenByte: Between[Byte] = (low: Byte, high: Byte) => new Generator[Byte] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toByte)
+    }
+    implicit val betweenChar: Between[Char] = (low: Char, high: Char) => new Generator[Char] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toChar)
+    }
+    implicit val betweenShort: Between[Short] = (low: Short, high: Short) => new Generator[Short] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toShort)
+    }
+    implicit val betweenInt: Between[Int] = (low: Int, high: Int) => new Generator[Int] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toInt)
+    }
+    implicit val betweenLong: Between[Long] = (low: Long, high: Long) => new Generator[Long] {
+      def apply(ps: Parameters) =
+        // See comment above at choose.
+        if (low == Long.MinValue && high == Long.MaxValue) {
+          Some(ps.random.nextLong)
+        } else {
+          choose(low, high, ps.random.nextDouble).map(_.toLong)
+        }
+    }
+    implicit val betweenFloat: Between[Float] = (low: Float, high: Float) => new Generator[Float] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toFloat)
+    }
+    implicit val betweenDouble: Between[Double] = (low: Double, high: Double) => new Generator[Double] {
+      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble)
+    }
+  }
 
   // Arbitrary generators are simply some handy generators for common
   // types organized for easy importation.
@@ -242,55 +162,108 @@ object MonkeyCheck {
         }
     }
 
-    ////////////////////////////////////////////////////////////////////////
-    // Tuples
+    object Tuples {
+      implicit def arbitraryTuple1[T1:Generator] =
+        (for {
+          t1 <- generator[T1]
+        } yield Tuple1(t1)).shrinkWith {
+          case Tuple1(t1) =>
+            generator[T1].shrink(t1).map(Tuple1(_))
+        }
 
-    implicit def arbitraryTuple[T1:Generator] =
-      (for {
-        t1 <- generator[T1]
-      } yield Tuple1(t1)).shrinkWith {
-        case Tuple1(t1) =>
-          generator[T1].shrink(t1).map(Tuple1(_))
-      }
+      implicit def arbitraryTuple2[T1:Generator, T2:Generator] =
+        (for {
+          t1 <- generator[T1]
+          t2 <- generator[T2]
+        } yield (t1, t2)).shrinkWith {
+          case (t1, t2) =>
+            generator[T1].shrink(t1).map((_, t2)) append
+            generator[T2].shrink(t2).map((t1, _))
+        }
 
-    implicit def arbitraryTuple[T1:Generator, T2:Generator] =
-      (for {
-        t1 <- generator[T1]
-        t2 <- generator[T2]
-      } yield (t1, t2)).shrinkWith {
-        case (t1, t2) =>
-          generator[T1].shrink(t1).map((_, t2)) append
-          generator[T2].shrink(t2).map((t1, _))
-      }
+      implicit def arbitraryTuple3[T1:Generator, T2:Generator, T3:Generator] =
+        (for {
+          t1 <- generator[T1]
+          t2 <- generator[T2]
+          t3 <- generator[T3]
+        } yield (t1, t2, t3)).shrinkWith {
+          case (t1, t2, t3) =>
+            generator[T1].shrink(t1).map((_, t2, t3)) append
+            generator[T2].shrink(t2).map((t1, _, t3)) append
+            generator[T3].shrink(t3).map((t1, t2, _))
+        }
 
-    implicit def arbitraryTuple[T1:Generator, T2:Generator, T3:Generator] =
-      (for {
-        t1 <- generator[T1]
-        t2 <- generator[T2]
-        t3 <- generator[T3]
-      } yield (t1, t2, t3)).shrinkWith {
-        case (t1, t2, t3) =>
-          generator[T1].shrink(t1).map((_, t2, t3)) append
-          generator[T2].shrink(t2).map((t1, _, t3)) append
-          generator[T3].shrink(t3).map((t1, t2, _))
-      }
+      implicit def arbitraryTuple4[T1:Generator, T2:Generator, T3:Generator, T4:Generator] =
+        (for {
+          t1 <- generator[T1]
+          t2 <- generator[T2]
+          t3 <- generator[T3]
+          t4 <- generator[T4]
+        } yield (t1, t2, t3, t4)).shrinkWith {
+          case (t1, t2, t3, t4) =>
+            generator[T1].shrink(t1).map((_, t2, t3, t4)) append
+            generator[T2].shrink(t2).map((t1, _, t3, t4)) append
+            generator[T3].shrink(t3).map((t1, t2, _, t4)) append
+            generator[T4].shrink(t4).map((t1, t2, t3, _))
+        }
 
-    implicit def arbitraryTuple[T1:Generator, T2:Generator, T3:Generator, T4:Generator] =
-      (for {
-        t1 <- generator[T1]
-        t2 <- generator[T2]
-        t3 <- generator[T3]
-        t4 <- generator[T4]
-      } yield (t1, t2, t3, t4)).shrinkWith {
-        case (t1, t2, t3, t4) =>
-          generator[T1].shrink(t1).map((_, t2, t3, t4)) append
-          generator[T2].shrink(t2).map((t1, _, t3, t4)) append
-          generator[T3].shrink(t3).map((t1, t2, _, t4)) append
-          generator[T4].shrink(t4).map((t1, t2, t3, _))
-      }
+      implicit def arbitraryTuple5[T1:Generator, T2:Generator, T3:Generator, T4:Generator, T5:Generator] =
+        (for {
+          t1 <- generator[T1]
+          t2 <- generator[T2]
+          t3 <- generator[T3]
+          t4 <- generator[T4]
+          t5 <- generator[T5]
+        } yield (t1, t2, t3, t4, t5)).shrinkWith {
+          case (t1, t2, t3, t4, t5) =>
+            generator[T1].shrink(t1).map((_, t2, t3, t4, t5)) append
+            generator[T2].shrink(t2).map((t1, _, t3, t4, t5)) append
+            generator[T3].shrink(t3).map((t1, t2, _, t4, t5)) append
+            generator[T4].shrink(t4).map((t1, t2, t3, _, t5)) append
+            generator[T5].shrink(t5).map((t1, t2, t3, t4, _))
+        }
 
-    // TODO: tuples up to 22
+      // TODO: tuples up to 22
+    }
 
+
+    object FunctionCalls {
+
+      import Tuples._
+
+      def resultOf[T:Generator, R](f: T => R) = generator[T].map(f)
+
+      def resultOf[
+        T1:Generator,
+        T2:Generator,
+        R
+      ](f: (T1, T2) => R) = generator[(T1, T2)].map(f.tupled)
+
+      def resultOf[
+        T1:Generator,
+        T2:Generator,
+        T3:Generator,
+        R
+      ](f: (T1, T2, T3) => R) = generator[(T1, T2, T3)].map(f.tupled)
+
+      def resultOf[
+        T1:Generator,
+        T2:Generator,
+        T3:Generator,
+        T4:Generator,
+        R
+      ](f: (T1, T2, T3, T4) => R) = generator[(T1, T2, T3, T4)].map(f.tupled)
+
+      def resultOf[
+        T1:Generator,
+        T2:Generator,
+        T3:Generator,
+        T4:Generator,
+        T5:Generator,
+        R
+      ](f: (T1, T2, T3, T4, T5) => R) = generator[(T1, T2, T3, T4, T5)].map(f.tupled)
+
+    }
     // TODO: Buildable containers, both seqs and maps.
 
 
@@ -310,46 +283,137 @@ object MonkeyCheck {
     }
   }
 
-  object Between {
+  type Predicate[-T] = T => Boolean
 
-    // Used internally to make generators for ordered things like numbers.
-    type Between[T] = (T, T) => Generator[T]
+  // Not clear right level to do this as we may want to combine
+  // Properties rather than Predicates.
+  implicit class RichPredicate[T](p: Predicate[T]) {
 
-    // This is still not quite right since while a double can
-    // represent the magnitude of the difference between Long.MinValue
-    // and Long.MaxValue it looses precision. We handle that specific
-    // case specially but similarly large ranges will have the same
-    // problem, I think.
-    private def choose(low: Double, high: Double, random: => Double) = if (low <= high) Some(low + (((high - low) + 1) * random)) else None
+    def &&(other: Predicate[T]) = (t: T) => p(t) && other(t)
 
-    implicit val betweenByte: Between[Byte] = (low: Byte, high: Byte) => new Generator[Byte] {
-      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toByte)
+    def ||(other: Predicate[T]) = (t: T) => p(t) || other(t)
+
+    def infix_!() = (t: T) => !p(t)
+
+  }
+
+  case class Parameters(size: Int, random: Random)
+
+  // Each time we check a Property we get a piece of evidence
+  // concerning the unerlying predicate. By checking the same property
+  // many times with different inputs we can amass enough evidence to
+  // return a Result. Undecided evidence only arises in exists
+  // properties because a single check that fails only tells us that
+  // that particular input didn't satisfy the property.
+  sealed trait Evidence[T]
+
+  // Based on value, the property was proved to hold. (E.g. an exists
+  // property can be proven with a single value.)
+  case class Proved[T](value: T) extends Evidence[T]
+
+  // Based on the value, the property was proved not to hold. (E.g. a
+  // forAll property can be falsified by a single counter example.)
+  case class Falsified[T](value: T) extends Evidence[T]
+
+  // The value tested provides support that the property could be
+  // true. (E.g. a specific value that passes a forAll property
+  // check.)
+  case class Support[T](value: T) extends Evidence[T]
+
+  // The value provided neither supports our belief in the property
+  // nor disproves it. (E.g. a value that fails an exists property.)
+  case class Undecided[T](value: T) extends Evidence[T]
+
+  ////////////////////////////////////////////////////////////////////////
+  // Checking a Property many times yields a result, either be being
+  // actualy Proved or Falsified or, after we have done all our
+  // checks, based on the ratio of support to checks.
+  sealed trait Result[T]
+  case class Passed[T]() extends Result[T]
+  case class Failed[T](value: Option[T]) extends Result[T]
+
+  // A Property is a function that can be passed a set of parameters
+  // for a generator and tries to return a Evidence. To actually check
+  // a Property we need to call it multiple times and make sure it
+  // never fails.
+  abstract class Property[T](
+    val predicate: Predicate[T],
+    val generator: Generator[T]
+  ) extends (Parameters => Option[Evidence[T]])
+
+  object Property {
+
+    import Arbitrary.Tuples._
+
+    implicit def toProperty[T](p: Predicate[T])(implicit g: Generator[T]) = new Property(p, g) {
+      def apply(params: Parameters) = generator(params).map { t =>
+        if (predicate(t)) Support(t) else Falsified(t)
+      }
     }
-    implicit val betweenChar: Between[Char] = (low: Char, high: Char) => new Generator[Char] {
-      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toChar)
-    }
-    implicit val betweenShort: Between[Short] = (low: Short, high: Short) => new Generator[Short] {
-      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toShort)
-    }
-    implicit val betweenInt: Between[Int] = (low: Int, high: Int) => new Generator[Int] {
-      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toInt)
-    }
-    implicit val betweenLong: Between[Long] = (low: Long, high: Long) => new Generator[Long] {
-      def apply(ps: Parameters) =
-        // See comment above at choose.
-        if (low == Long.MinValue && high == Long.MaxValue) {
-          Some(ps.random.nextLong)
-        } else {
-          choose(low, high, ps.random.nextDouble).map(_.toLong)
-        }
-    }
-    implicit val betweenFloat: Between[Float] = (low: Float, high: Float) => new Generator[Float] {
-      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble).map(_.toFloat)
-    }
-    implicit val betweenDouble: Between[Double] = (low: Double, high: Double) => new Generator[Double] {
-      def apply(ps: Parameters) = choose(low, high, ps.random.nextDouble)
+
+    // Default conversion of a predicate to a property is to capture
+    // the appropriate generator and assert that the predicat should
+    // hold for all generated values.
+    def forAll[T:Generator](p: Predicate[T]) = toProperty(p)
+
+    def forAll[
+      T1:Generator,
+      T2:Generator]
+      (fn: (T1, T2) => Boolean) = toProperty(fn.tupled)
+
+    def forAll[
+      T1:Generator,
+      T2:Generator,
+      T3:Generator]
+      (fn: (T1, T2, T3) => Boolean) = toProperty(fn.tupled)
+
+    def forAll[
+      T1:Generator,
+      T2:Generator,
+      T3:Generator,
+      T4:Generator]
+      (fn: (T1, T2, T3, T4) => Boolean) = toProperty(fn.tupled)
+
+    def forAll[
+      T1:Generator,
+      T2:Generator,
+      T3:Generator,
+      T4:Generator,
+      T5:Generator]
+      (fn: (T1, T2, T3, T4, T5) => Boolean) = toProperty(fn.tupled)
+
+    // Less frequently used in tests, ocassionally it's useful to be
+    // able to assert that a predicate holds for at least one
+    // generated value.
+    def exists[T](p: Predicate[T])(implicit g: Generator[T]) = new Property(p, g) {
+      def apply(params: Parameters) = generator(params).map { t =>
+        if (predicate(t)) Proved(t) else Undecided(t)
+      }
     }
   }
+
+  def check[T](property: Property[T], params: Parameters): Result[T] = {
+    @tailrec def loop(iters: Int, support: Int, trials: Int): Result[T] = {
+      if (iters == 0) {
+        if (trials > 0 && (support.toDouble / trials) > .8) Passed() else Failed(None)
+      } else {
+        property(params) match {
+          case Some(Proved(_))    => Passed()
+          case Some(Falsified(t)) => Failed(Some(t))
+          case Some(Support(_))   => loop(iters - 1, support + 1, trials + 1)
+          case Some(Undecided(_)) => loop(iters - 1, support, trials + 1)
+          case None               => loop(iters - 1, support, trials)
+        }
+      }
+    }
+
+    // FIXME: the number of iterations should be attached to the
+    // propety itself, perhaps derived from the generator if not
+    // otherwise specified.
+    loop(1000000, 0, 0)
+  }
+
+
 }
 
 object HelloWorld {
@@ -371,6 +435,7 @@ object HelloWorld {
     implicit val sgen: Generator[String] = new Generator[String] {
       def apply(params: Parameters) = {
         import MonkeyCheck.Arbitrary._
+        import MonkeyCheck.Generator.arbitrary
         val sb = new StringBuilder(params.size)
         for (i <- 1 to params.size) { arbitrary[Char](params).foreach { c => sb + c } }
         Some(sb.toString)
