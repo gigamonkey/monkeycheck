@@ -290,8 +290,8 @@ object MonkeyCheck {
         R
       ](f: (T1, T2, T3, T4, T5) => R) = generator[(T1, T2, T3, T4, T5)].map(f.tupled)
 
+      // TODO: resultOf for functions up to 22 parameters
     }
-    // TODO: Buildable containers, both seqs and maps.
 
 
     // Not clear how useful these arbitrary functions really are since
@@ -409,6 +409,8 @@ object MonkeyCheck {
       T5:Generator]
       (fn: (T1, T2, T3, T4, T5) => Boolean) = toProperty(fn.tupled)
 
+    // TODO: forAll for functions up to 22 parameters
+
     // Less frequently used in tests, ocassionally it's useful to be
     // able to assert that a predicate holds for at least one
     // generated value.
@@ -493,7 +495,8 @@ object HelloWorld {
       import MonkeyCheck.Arbitrary.Numbers._
       import MonkeyCheck.Arbitrary.Tuples._
       import MonkeyCheck.Arbitrary.Collections._
-      show("tuples", check(forAll { (s: (Int, Int, Double)) => println(s); true }, params))
+
+      show("tuples", check(forAll { (s: (Int, String, Double)) => println(s); true }, params))
       show("set of ints", check(forAll { (s: Set[Int]) => println(s); true }, params))
       show("list of tuples", check(forAll { (s: List[(Int, Set[Int])]) => println(s); true }, params))
       show("maps", check(forAll { (m: Map[Int, Byte]) => println(m); true }, params))
