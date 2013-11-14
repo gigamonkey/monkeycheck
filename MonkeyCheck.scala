@@ -53,7 +53,7 @@ object MonkeyCheck {
 
     // This is still not quite right since while a double can
     // represent the magnitude of the difference between Long.MinValue
-    // and Long.MaxValue it looses precision. We handle that specific
+    // and Long.MaxValue it loses precision. We handle that specific
     // case specially but similarly large ranges will have the same
     // problem, I think.
     private def choose(low: Double, high: Double, random: => Double) =
@@ -99,8 +99,8 @@ object MonkeyCheck {
         implicit lazy val positiveShort:  Generator[Short]   = between(1, Short.MaxValue)
         implicit lazy val positiveInt:    Generator[Int]     = between(1, Int.MaxValue)
         implicit lazy val positiveLong:   Generator[Long]    = between(1, Long.MaxValue)
-        implicit lazy val positiveFloat:  Generator[Float]   = between(1, Float.MaxValue)
-        implicit lazy val positiveDouble: Generator[Double]  = between(1, Double.MaxValue)
+        implicit lazy val positiveFloat:  Generator[Float]   = between(Float.MinPositiveValue, Float.MaxValue)
+        implicit lazy val positiveDouble: Generator[Double]  = between(Double.MinPositiveValue, Double.MaxValue)
       }
 
       object - {
@@ -108,8 +108,8 @@ object MonkeyCheck {
         implicit lazy val negativeShort:  Generator[Short]   = between(Short.MinValue, -1)
         implicit lazy val negativeInt:    Generator[Int]     = between(Int.MinValue, -1)
         implicit lazy val negativeLong:   Generator[Long]    = between(Long.MinValue, -1)
-        implicit lazy val negativeFloat:  Generator[Float]   = between(Float.MinValue, -1)
-        implicit lazy val negativeDouble: Generator[Double]  = between(Double.MinValue, -1)
+        implicit lazy val negativeFloat:  Generator[Float]   = between(Float.MinValue, -1 * Float.MinPositiveValue)
+        implicit lazy val negativeDouble: Generator[Double]  = between(Double.MinValue, -1 * Double.MinPositiveValue)
       }
 
       object !- {
