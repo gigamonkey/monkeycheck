@@ -1,6 +1,9 @@
 package com.gigamonkeys.monkeycheck
 
 import scala.annotation.tailrec
+import scala.collection.mutable.Builder
+import scala.collection.generic.CanBuildFrom
+import scala.language.higherKinds
 import scala.language.implicitConversions
 import scala.util.Random
 
@@ -226,6 +229,30 @@ object MonkeyCheck {
       // TODO: tuples up to 22
     }
 
+    object Collections {
+
+      implicit def collection[T:Generator, C[_]](implicit c: CanBuildFrom[C[_], T, C[T]]): Generator[C[T]] = new Generator[C[T]] {
+        def apply(p: Parameters) = {
+          val b = c.apply
+          (1 to p.size).foreach { _ =>
+            arbitrary[T](p).foreach { t => b += t }
+          }
+          Some(b.result)
+        }
+      }
+
+      import Tuples.arbitraryTuple2
+
+      implicit def collection2[T:Generator, U:Generator, C[_,_]](implicit c: CanBuildFrom[C[_,_], (T, U), C[T, U]]): Generator[C[T, U]] = new Generator[C[T, U]] {
+        def apply(p: Parameters) = {
+          val b = c.apply
+            (1 to p.size).foreach { _ =>
+              arbitrary[(T,U)](p).foreach { t => b += t }
+            }
+          Some(b.result)
+        }
+      }
+    }
 
     object FunctionCalls {
 
@@ -345,15 +372,15 @@ object MonkeyCheck {
 
     import Arbitrary.Tuples._
 
+    // Default conversion of a predicate to a property is to capture
+    // the appropriate generator and assert that the predicate should
+    // hold for all generated values.
     implicit def toProperty[T](p: Predicate[T])(implicit g: Generator[T]) = new Property(p, g) {
       def apply(params: Parameters) = generator(params).map { t =>
         if (predicate(t)) Support(t) else Falsified(t)
       }
     }
 
-    // Default conversion of a predicate to a property is to capture
-    // the appropriate generator and assert that the predicat should
-    // hold for all generated values.
     def forAll[T:Generator](p: Predicate[T]) = toProperty(p)
 
     def forAll[
@@ -410,7 +437,7 @@ object MonkeyCheck {
     // FIXME: the number of iterations should be attached to the
     // propety itself, perhaps derived from the generator if not
     // otherwise specified.
-    loop(1000000, 0, 0)
+    loop(10, 0, 0)
   }
 
 
@@ -462,8 +489,20 @@ object HelloWorld {
       show("sums greater than their parts", check(forAll((i1: Int, i2: Int) => i1 + i2 > i1 && i1 + i2 > i2), params))
     }
 
+    def collections() {
+      import MonkeyCheck.Arbitrary.Numbers._
+      import MonkeyCheck.Arbitrary.Tuples._
+      import MonkeyCheck.Arbitrary.Collections._
+      show("tuples", check(forAll { (s: (Int, Int, Double)) => println(s); true }, params))
+      show("set of ints", check(forAll { (s: Set[Int]) => println(s); true }, params))
+      show("list of tuples", check(forAll { (s: List[(Int, Set[Int])]) => println(s); true }, params))
+      show("maps", check(forAll { (m: Map[Int, Byte]) => println(m); true }, params))
+    }
+
     allNumbers()
     positiveNumbers()
+    collections()
+
 
   }
 }
