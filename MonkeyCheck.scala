@@ -49,7 +49,7 @@ object MonkeyCheck {
   object Between {
 
     // Used internally to make generators for ordered things like numbers.
-    type Between[T] = (T, T) => Generator[T]
+    type Between[T] = (T, T) => Generator[T] // FIXME T should really be orderable.
 
     // This is still not quite right since while a double can
     // represent the magnitude of the difference between Long.MinValue
@@ -130,7 +130,6 @@ object MonkeyCheck {
 
     }
 
-    implicit lazy val arbitraryChar:    Generator[Char]    = between(Char.MinValue, Char.MaxValue)
     implicit lazy val arbitraryBoolean: Generator[Boolean] = oneOf(true, false)
     implicit lazy val arbitraryUnit:    Generator[Unit]    = const(())
 
@@ -143,7 +142,7 @@ object MonkeyCheck {
           Numbers.arbitraryLong,
           Numbers.arbitraryFloat,
           Numbers.arbitraryDouble,
-          arbitraryChar,
+          Characters.Unicode.unicodeChar,
           arbitraryBoolean,
           arbitraryUnit).apply(p).flatMap(_.apply(p))
     }
@@ -231,7 +230,7 @@ object MonkeyCheck {
 
     object Collections {
 
-      implicit def collection[T:Generator, C[_]](implicit c: CanBuildFrom[C[_], T, C[T]]): Generator[C[T]] = new Generator[C[T]] {
+      implicit def collection[T:Generator, C[_]](implicit c: CanBuildFrom[Nothing, T, C[T]]): Generator[C[T]] = new Generator[C[T]] {
         def apply(p: Parameters) = {
           val b = c.apply
           (1 to p.size).foreach { _ =>
@@ -243,7 +242,7 @@ object MonkeyCheck {
 
       import Tuples.arbitraryTuple2
 
-      implicit def collection2[T:Generator, U:Generator, C[_,_]](implicit c: CanBuildFrom[C[_,_], (T, U), C[T, U]]): Generator[C[T, U]] = new Generator[C[T, U]] {
+      implicit def collection2[T:Generator, U:Generator, C[_,_]](implicit c: CanBuildFrom[Nothing, (T, U), C[T, U]]): Generator[C[T, U]] = new Generator[C[T, U]] {
         def apply(p: Parameters) = {
           val b = c.apply
             (1 to p.size).foreach { _ =>
@@ -251,6 +250,41 @@ object MonkeyCheck {
             }
           Some(b.result)
         }
+      }
+
+    }
+
+    object Characters {
+
+      object Unicode {
+        implicit lazy val unicodeChar: Generator[Char] = between(Char.MinValue, Char.MaxValue)
+      }
+
+      object Ascii {
+        implicit lazy val asciiChar: Generator[Char] = between(0, 256)
+      }
+
+      object Alphanumeric {
+        implicit lazy val asciiChar: Generator[Char] = oneOf("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toList)
+      }
+    }
+
+    object Strings {
+      import Collections._
+
+      object Unicode {
+        import Characters.Unicode._
+        implicit val unicodeString: Generator[String] = generator[Seq[Char]].map(_.mkString)
+      }
+
+      object Ascii {
+        import Characters.Ascii._
+        implicit val asciiString: Generator[String] = generator[Seq[Char]].map(_.mkString)
+      }
+
+      object Alphanumeric {
+        import Characters.Alphanumeric._
+        implicit val alphanumericString: Generator[String] = generator[Seq[Char]].map(_.mkString)
       }
     }
 
@@ -308,6 +342,7 @@ object MonkeyCheck {
     implicit def arbitraryFunction2[T1,T2,R:Generator]: Generator[(T1, T2) => R] = new Generator[(T1, T2) => R] {
       def apply(p: Parameters) = for { r <- arbitrary[R](p) } yield (t1: T1, t2: T2) => r
     }
+
   }
 
   type Predicate[-T] = T => Boolean
@@ -461,19 +496,27 @@ object HelloWorld {
 
     val params = Parameters(10, new Random)
 
-    implicit val sgen: Generator[String] = new Generator[String] {
-      def apply(params: Parameters) = {
-        import MonkeyCheck.Arbitrary._
-        import MonkeyCheck.Generator.arbitrary
-        val sb = new StringBuilder(params.size)
-        for (i <- 1 to params.size) { arbitrary[Char](params).foreach { c => sb + c } }
-        Some(sb.toString)
-      }
+    def strings() {
+      import MonkeyCheck.Arbitrary.Strings.Unicode._
+      show("string length",      check(forAll { (s1: String, s2: String) => println(s1 + s2); (s1 + s2).length == s1.length + s2.length }, params))
+      show("string reverse",     check(forAll { (s1: String) => println(s1); s1.reverse.reverse == s1 }, params))
+      show("string upper/lower", check(forAll { (s: String) => println(s); s.toUpperCase.toLowerCase == s.toLowerCase }, params))
     }
 
-    show("string length", check(forAll((s1: String, s2: String) => (s1 + s2).length == s1.length + s2.length), params))
-    show("string reverse", check(forAll((s1: String) => s1.reverse.reverse == s1), params))
-    show("string upper/lower", check(forAll((s: String) => s.toUpperCase.toLowerCase == s.toLowerCase), params))
+    def alphanumericStrings() {
+      import Generator._
+      import MonkeyCheck.Arbitrary.Characters.Alphanumeric._
+      import MonkeyCheck.Arbitrary.Collections._
+
+      implicit val arbitraryString: Generator[String] = generator[Seq[Char]].map(_.mkString)
+
+      show("alphanumeric strings", check(forAll { (s: String) => println(s); true }, params))
+    }
+
+    def alphanumericStrings2() {
+      import MonkeyCheck.Arbitrary.Strings.Alphanumeric._
+      show("alphanumeric strings 2", check(forAll { (s: String) => println(s); true }, params))
+    }
 
     def allNumbers() {
       import MonkeyCheck.Arbitrary.Numbers._
@@ -495,6 +538,7 @@ object HelloWorld {
       import MonkeyCheck.Arbitrary.Numbers._
       import MonkeyCheck.Arbitrary.Tuples._
       import MonkeyCheck.Arbitrary.Collections._
+      import MonkeyCheck.Arbitrary.Strings.Ascii._
 
       show("tuples", check(forAll { (s: (Int, String, Double)) => println(s); true }, params))
       show("set of ints", check(forAll { (s: Set[Int]) => println(s); true }, params))
@@ -502,9 +546,12 @@ object HelloWorld {
       show("maps", check(forAll { (m: Map[Int, Byte]) => println(m); true }, params))
     }
 
-    allNumbers()
-    positiveNumbers()
-    collections()
+    strings()
+    alphanumericStrings()
+    alphanumericStrings2()
+    //allNumbers()
+    //positiveNumbers()
+    //collections()
 
 
   }
