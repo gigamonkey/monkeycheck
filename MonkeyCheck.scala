@@ -506,18 +506,8 @@ object HelloWorld {
     }
 
     def alphanumericStrings() {
-      import Generator._
-      import MonkeyCheck.Arbitrary.Characters.Alphanumeric._
-      import MonkeyCheck.Arbitrary.Collections._
-
-      implicit val arbitraryString: Generator[String] = generator[Seq[Char]].map(_.mkString)
-
-      show("alphanumeric strings", check(forAll { (s: String) => println(s); true }, params))
-    }
-
-    def alphanumericStrings2() {
       import MonkeyCheck.Arbitrary.Strings.Alphanumeric._
-      show("alphanumeric strings 2", check(forAll { (s: String) => println(s); true }, params))
+      show("alphanumeric strings", check(forAll { (s: String) => println(s); true }, params))
     }
 
     def allNumbers() {
@@ -550,7 +540,6 @@ object HelloWorld {
 
     strings()
     alphanumericStrings()
-    alphanumericStrings2()
     //allNumbers()
     //positiveNumbers()
     //collections()
