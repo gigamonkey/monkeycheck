@@ -9,7 +9,6 @@ import scala.util.Random
 
 object MonkeyCheck {
 
-  import Between._
   import Generator._
 
   trait Generator[T] extends (Parameters => Option[T]) { outer =>
@@ -38,6 +37,7 @@ object MonkeyCheck {
   }
 
   object Generator {
+    import Between._
     def generator[T](implicit g: Generator[T]): Generator[T]              = g
     def between[T](min: T, max: T)(implicit b: Between[T]): Generator[T]  = b(min, max)
     def oneOf[T](xs: Seq[T]): Generator[T]                                = between(0, xs.size - 1).map(xs(_))
@@ -93,6 +93,7 @@ object MonkeyCheck {
   object Arbitrary {
 
     object Numbers {
+      import Between._
 
       object + {
         implicit lazy val positiveByte:   Generator[Byte]    = between(1, Byte.MaxValue)
@@ -255,6 +256,7 @@ object MonkeyCheck {
     }
 
     object Characters {
+      import Between._
 
       object Unicode {
         implicit lazy val unicodeChar: Generator[Char] = between(Char.MinValue, Char.MaxValue)
