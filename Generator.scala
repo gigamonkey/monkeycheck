@@ -32,9 +32,36 @@ trait Generator[T] extends (Parameters => Option[T]) { outer =>
 object Generator {
   import Between._
 
+  /*
+   * Get the implicitly available generator for the given type.
+   */
   def generator[T](implicit g: Generator[T]): Generator[T] = g
+
+  /*
+   * Make a generator of T that returns one of the elements of the given sequence.
+   */
   def oneOf[T](xs: Seq[T]): Generator[T] = between(0, xs.size - 1).map(xs(_))
+
+  /*
+   * Make a generator of T that returns of the argument values.
+   */
   def oneOf[T](t: T, ts: T*): Generator[T] = oneOf(t +: ts)
+
+  /*
+   * Make a generator that always returns the same value.
+   */
   def const[T](t: T) = new Generator[T] { def apply(p: Parameters) = Some(t) }
+
+  /*
+   * Make a generator that returns a T between a given min and max, inclusive.
+   */
+  def between[T](min: T, max: T)(implicit b: Between[T]): Generator[T] = new Generator[T] {
+    def apply(ps: Parameters) = b(min, max, ps.random)
+  }
+
+  /*
+   * Get an arbitrary T using the implicitly available generator of T.
+   */
   def arbitrary[T](ps: Parameters)(implicit g: Generator[T]): Option[T] = g(ps)
+
 }
