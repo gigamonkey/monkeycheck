@@ -7,18 +7,6 @@ import scala.language.higherKinds
 import scala.language.implicitConversions
 import scala.util.Random
 
-// Not clear right level to do this as we may want to combine
-// Properties rather than Predicates.
-/*implicit class RichPredicate[T](p: Predicate[T]) {
-
-  def &&(other: Predicate[T]) = (t: T) => p(t) && other(t)
-
-  def ||(other: Predicate[T]) = (t: T) => p(t) || other(t)
-
-  def infix_!() = (t: T) => !p(t)
-
-}
- */
 // Each time we check a Property we get a piece of evidence
 // concerning the unerlying predicate. By checking the same property
 // many times with different inputs we can amass enough evidence to
