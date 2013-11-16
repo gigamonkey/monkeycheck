@@ -31,8 +31,8 @@ trait Generator[T] extends (Parameters => Option[T]) { outer =>
 
 object Generator {
   import Between._
+
   def generator[T](implicit g: Generator[T]): Generator[T] = g
-  def between[T](min: T, max: T)(implicit b: Between[T]): Generator[T] = b(min, max)
   def oneOf[T](xs: Seq[T]): Generator[T] = between(0, xs.size - 1).map(xs(_))
   def oneOf[T](t: T, ts: T*): Generator[T] = oneOf(t +: ts)
   def const[T](t: T) = new Generator[T] { def apply(p: Parameters) = Some(t) }
