@@ -17,26 +17,7 @@ object MonkeyCheck {
       }))
   }
 
-  def check[T](property: Property[T], params: Parameters): Result[T] = {
-    @tailrec def loop(iters: Int, support: Int, trials: Int): Result[T] = {
-      if (iters == 0) {
-        if (trials > 0 && (support.toDouble / trials) > .8) Passed() else Failed(None)
-      } else {
-        property(params) match {
-          case Some(Proved(_))    => Passed()
-          case Some(Falsified(t)) => Failed(Some(t))
-          case Some(Support(_))   => loop(iters - 1, support + 1, trials + 1)
-          case Some(Undecided(_)) => loop(iters - 1, support, trials + 1)
-          case None               => loop(iters - 1, support, trials)
-        }
-      }
-    }
-
-    // FIXME: the number of iterations should be attached to the
-    // propety itself, perhaps derived from the generator if not
-    // otherwise specified.
-    loop(10, 0, 0)
-  }
+  def check[T](property: Property[T], params: Parameters): Result[T] = property.check(params)
 
   def main(args: Array[String]) {
     import Property._
