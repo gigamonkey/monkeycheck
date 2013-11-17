@@ -19,21 +19,29 @@ object MonkeyCheck {
 
   def check[T](property: Property[T], params: Parameters): Result[T] = property.check(params)
 
+  def check2[T](property: Property[T], params: Parameters): Unit = {
+    println((property.label.getOrElse("unlabled") + " ").padTo(60, '.') + " " +
+      (property.check(params) match {
+        case Passed() => "okay."
+        case Failed(t) => "whoops! Failed at: " + t.getOrElse("unknown")
+      }))
+  }
+
   def main(args: Array[String]) {
     import Property._
 
-    val params = Parameters(10, new Random)
+    val params = Parameters(10, new Random, 10)
 
     def strings() {
       import Arbitrary.Strings.Unicode._
-      show("string length",      check(forAll { (s1: String, s2: String) => println(s1 + s2); (s1 + s2).length == s1.length + s2.length }, params))
-      show("string reverse",     check(forAll { (s1: String) => println(s1); s1.reverse.reverse == s1 }, params))
-      show("string upper/lower", check(forAll { (s: String) => println(s); s.toUpperCase.toLowerCase == s.toLowerCase }, params))
+      check2(forAll { (s1: String, s2: String) => (s1 + s2).length == s1.length + s2.length }.labeled("string length"), params)
+      check2(forAll { (s1: String) => s1.reverse.reverse == s1 }.labeled("string reverse"), params)
+      check2(forAll { (s: String) => s.toUpperCase.toLowerCase == s.toLowerCase }.labeled("string upper/lower"), params)
     }
 
     def alphanumericStrings() {
       import Arbitrary.Strings.Alphanumeric._
-      show("alphanumeric strings", check(forAll { (s: String) => println(s); true }, params))
+      check2(forAll { (s: String) => println(s); true }.labeled("alphanumeric strings"), params)
     }
 
     def allNumbers() {

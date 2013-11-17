@@ -2,7 +2,11 @@ package com.gigamonkeys.monkeycheck
 
 import scala.util.Random
 
-case class Parameters(size: Int, random: Random)
+case class Parameters(
+  size: Int,
+  random: Random,
+  iterations: Int
+)
 
 trait Generator[T] extends (Parameters => Option[T]) { outer =>
 

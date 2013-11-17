@@ -46,8 +46,9 @@ case class Failed[T](value: Option[T]) extends Result[T]
 // never fails.
 abstract class Property[T](
   val predicate: Predicate[T],
-  val generator: Generator[T]
-) extends (Parameters => Option[Evidence[T]]) {
+  val generator: Generator[T],
+  val label: Option[String] = None
+) extends (Parameters => Option[Evidence[T]]) { outer =>
 
   def check(params: Parameters): Result[T] = {
     @tailrec def loop(iters: Int, support: Int, trials: Int): Result[T] = {
@@ -67,9 +68,16 @@ abstract class Property[T](
     // FIXME: the number of iterations should be attached to the
     // propety itself, perhaps derived from the generator if not
     // otherwise specified.
-    loop(10, 0, 0)
+    loop(params.iterations, 0, 0)
   }
 
+  def labeled(newLabel: String) = new Property(predicate, generator, Some(newLabel)) {
+    def apply(params: Parameters) = outer(params)
+  }
+
+  def withGenerator(newGenerator: Generator[T]) = new Property(predicate, newGenerator, label) {
+    def apply(params: Parameters) = outer(params)
+  }
 
 }
 
