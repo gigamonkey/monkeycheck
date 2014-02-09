@@ -47,7 +47,7 @@ object Generator {
   def oneOf[T](xs: Seq[T]): Generator[T] = between(0, xs.size - 1).map(xs(_))
 
   /*
-   * Make a generator of T that returns of the argument values.
+   * Make a generator of T that returns one of the argument values.
    */
   def oneOf[T](t: T, ts: T*): Generator[T] = oneOf(t +: ts)
 

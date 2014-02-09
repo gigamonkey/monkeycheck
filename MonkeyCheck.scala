@@ -32,6 +32,20 @@ object MonkeyCheck {
 
     val params = Parameters(10, new Random, 10)
 
+    def betweenProperties() {
+      import Generator.between
+      import Between._
+      import Arbitrary.Numbers._
+      check2(
+        forAll((i1: Int, i2: Int) => {
+          val g = between(i1, i2)
+          g(params).map { v =>
+            i1 <= v && v <= i2
+          }.getOrElse(true)
+        }).labeled("between int in range"), Parameters(10, new Random, 100000))
+      }
+
+
     def strings() {
       import Arbitrary.Strings.Unicode._
       check2(forAll { (s1: String, s2: String) => (s1 + s2).length == s1.length + s2.length }.labeled("string length"), params)
@@ -77,5 +91,6 @@ object MonkeyCheck {
     allNumbers()
     positiveNumbers()
     collections()
+    betweenProperties()
   }
 }
