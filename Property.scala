@@ -33,9 +33,10 @@ case class Support[T](value: T) extends Evidence[T]
 case class Undecided[T](value: T) extends Evidence[T]
 
 ////////////////////////////////////////////////////////////////////////
-// Checking a Property many times yields a result, either be being
-// actualy Proved or Falsified or, after we have done all our
-// checks, based on the ratio of support to checks.
+// Checking a Property many times yields a result, either by being
+// actualy Proved or Falsified or, after we have done all our checks,
+// based on the ratio of support to checks.
+
 sealed trait Result[T]
 case class Passed[T]() extends Result[T]
 case class Failed[T](value: Option[T]) extends Result[T]
