@@ -1,0 +1,13 @@
+- Add labels to generators and properties and use them in results reporting.
+
+- Generator combinators.
+
+- Abstract result reporting (check scalacheck to see how to integrate into existing test running frameworks.)
+
+- Figure out better way to pass parameters or otherwise customize generators.
+
+- Use macros to generate tuple, forAll, etc. up to 22 args.
+
+- Figure out how to control number of iterations per property check.
+
+- Implement failing input shrinking.
